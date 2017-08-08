@@ -1,0 +1,353 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[parfill]{parskip}   %paragraph new lines
+
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{tikz}
+\usepackage{float}
+\usepackage{csquotes} % For \begin{displayquote}
+\usetikzlibrary{arrows, positioning, calc}
+\pgfplotstableset{
+  col sep=comma,
+  every head row/.style={%
+    before row=\toprule,%
+    after row=\midrule},%
+  every last row/.style={%
+    after row=\bottomrule}%
+}
+
+\usepackage{color}
+\usepackage{xcolor}
+\definecolor{gray}{HTML}{F2F2F2}
+\definecolor{darkgray}{HTML}{2D2D2D}
+\definecolor{mildgreen}{RGB}{34, 139, 34}
+
+\usepackage{hyperref}
+
+\usepackage{listings}
+\lstset{ % 
+language=Python,                % choose the language of the code  
+basicstyle=\ttfamily\scriptsize,       % the size of the fonts that are used for the code
+numbers=left,                   % where to put the line-numbers
+numberstyle=\tiny\color{darkgray},
+backgroundcolor=\color{gray},  % choose the background color. You must add \usepackage{color}
+commentstyle=\color{mildgreen},
+keywordstyle=\color{magenta},
+showspaces=false,               % show spaces adding particular underscores
+showstringspaces=false,         % underline spaces within strings
+showtabs=false,                 % show tabs within strings adding particular underscores
+tabsize=2,          % sets default tabsize to 2 spaces
+frame=single,           % adds a frame around the code
+captionpos=b,           % sets the caption-position to bottom
+breaklines=true,        % sets automatic line breaking
+breakatwhitespace=false,    % sets if automatic breaks should only happen at whitespace
+escapeinside={\%*}{*)}  
+}
+
+\newcommand{\myworries}[1]{
+\textcolor{red}{#1}
+}
+
+\title{Zeeguu Internship - Final Report}
+\author{Timon Back (s3218147) \& Peter Ullrich (s2273942)}
+\date{Block 2B - 2016/17}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+In the first weeks of our Internship, we researched promising scheduling algorithms, which could help to optimize the learning rate of users of the Zeeguu system. Zeeguu is a research project by Prof. Mircea Lungu and aims to make learning languages quick and fun by enabling learners to read texts written in foreign languages and save and exercise any unknown words found in these texts. We focused on and discussed two algorithms with Prof. Lungu of the University of Groningen, which were the \textbf{A}daptive \textbf{R}esponse \textbf{T}ime based \textbf{S}equencing (ARTS) algorithm by Mettler, Massey, and Kellman (2011) and the DASH algorithm proposed by Lindsey, Shroyer, Pashler, and Mozer (2013)\cite{mettler2014adaptive}, which focuses on item \textbf{D}ifficulty, the students’ \textbf{A}bility, and the individual \textbf{S}tudy \textbf{H}istory. The ARTS and DASH algorithms both aim to create a schedule, which maximizes the positive impact of the spacing effect\cite{bahrick1993maintenance} on learning.
+
+The DASH algorithm was implemented and tested with 179 third-semester Spanish learning students, which was according to Lindsey, Shroyer, Pashler, and Mozer (2013) the biggest sample group of any research on scheduling algorithms so far. The DASH algorithm is based on a latent-state Bayesian model, which gives it convincing statistical credibility, however its root in intricate Statistics made it hard to grasp and adjust to our needs. In their experiment with Spanish as foreign language learners, the authors showed that participants were more likely to correctly recall learned words in an exam 28 days after the Spanish course ended when they learned the words according to a schedule created using the DASH algorithm. 
+The ARTS algorithm on the other hand was not heavily mathematical, but very straight forward and easy to understand, which also meant that we could adjust it according to our needs. The authors Mettler, Massey, and Kellman tested the ARTS algorithm on undergraduate students, who had to learn and correctly recall the geographical location of 24 African countries. The authors conducted this experiment two times, once in 2011 with 50 participants and once in 2016 with 72 participants. The results of these experiments showed that the participants were better at recalling the location of African countries when they learned them according to an adaptive schedule created and updated by the ARTS algorithm after each exercise. 
+
+Although the DASH algorithm had a more convincing mathematical foundation, we decided on using the ARTS algorithm instead since it offered more possibilities to adapt the algorithm to the Zeeguu context.
+
+\section{The ARTS Algorithm}
+The ARTS algorithm as proposed by \cite{mettler2014adaptive} is based on the following formula in \autoref{eq:arts}. The combined priorities of all words that a user should learn defines an order in which the words are repeated. The word with the highest priority gets repeated next.
+
+\begin{equation}\label{eq:arts}
+Priority = a * (N-D) * [(1 - \alpha) * b * log(\frac{RT}{r}) + \alpha * w]
+\end{equation}
+
+where the factors stand for:
+\begin{enumerate}
+    \item[a] A global linear scaling factor
+    \item[N] Number of iterations that have passed since this word has been practised last
+    \item[D] Penalty for words that have been practised shortly before\footnote{We measure this in a simplified learning sessions. Every word creates a new session.}
+    \item[$\alpha$] Indicates with 0 (correct) and 1 (incorrect) the outcome from the last practise
+    \item[b] Scaling factor for words that have been answered correctly the last time
+    \item[RT] The reaction time for giving the answer\footnote{The unit does not matter, as long as always the same unit is used. We use milliseconds.}
+    \item[r] Scaling factor for the reaction time (inverted)
+    \item[w] Scaling factor for words that have been answered incorrectly the last time
+\end{enumerate}
+
+As one notices, the priority of an item only depends on the last practise result. The complete history for that item is not taken into consideration. This makes the algorithm light-weight during calculation. Still, the algorithm needs to be re-run for every learning iteration as indirectly the time of last practice for each word ($N-D$) is part of the formula.
+
+\section{Implementing the ARTS Algorithm in Zeeguu Core}
+We decided on implementing the ARTS algorithm in the Zeeguu Core\footnote{\url{https://github.com/mircealungu/Zeeguu-Core}} code base, which functions as connection between the database and the Zeeguu API, which in turn is used by the Zeeguu App, the front-end component of the Zeeguu system. The whole Zeeguu system resolves around the \lstinline|Bookmark| class, which represents a word that a user wants to learn. Whenever a \lstinline|Bookmark| is learned, an \lstinline|Exercise| object is added to its \lstinline|exercise log|. The \lstinline|exercise| instance holds, among others, information about whether the \lstinline|Bookmark| was recalled correctly and the time it took until the \lstinline|Bookmark| was recalled. Thus, the \lstinline|Exercise| class holds all information needed for the ARTS algorithm. 
+
+\subsection{Algorithm}
+The implementation of the ARTS algorithm is done as shown below. It takes the formula proposed by \cite{mettler2014adaptive} and also uses their default values for the parameters.
+
+A single instance of the algorithm does not depend on any other class. The \lstinline|calculate| method can be called as often as needed to calculate the priority of any bookmark.
+
+\begin{lstlisting}[language=Python,frame=single] 
+class ArtsRT:
+    """
+    ARTS algorithm with default values as described in:
+    Adaptive response-time-based category sequencing in perceptual learning
+    by Everett Mettler and Philip J. Kellman
+
+    a: Constant - general weight
+    D: Constant - enforced delay (trials)
+    b: Constant - weight for the response time
+    r: Constant - weight for the response time (inside log)
+    w: Constant - priority increment for an error. Higher values let incorrect items appear quicker again
+    """
+
+    def __init__(self, a=0.1, d=2, b=1.1, r=1.7, w=20):
+        self.a = a
+        self.d = d
+        self.b = b
+        self.r = r
+        self.w = w
+
+    def calculate(self, args):
+        """ Calculate the ARTS priority
+        Parameters:
+            args: Contains the following parameters:
+                N: number of trials since item was presented
+                alpha: 0, if item was last answered correct; 1 otherwise
+                RT: response time on most recent presentation
+        """
+        N, alpha, RT = args
+        return self.a \
+               * (N - self.d) \
+               * ((1 - alpha) * self.b * math.log(RT / self.r)
+                   + (alpha * self.w))
+\end{lstlisting}
+
+\subsection{AlgorithmService}
+The AlgorithmService is a controller that handles the calculation of bookmark priorities based on the ARTS algorithm. Its main function is the \lstinline|update_bookmark_priorities()| function, which updates and stores the priorities for all bookmarks of a give user. The algorithm instance, which ultimately calculates the priority for a given bookmark using its last exercise, is retrieved from the ABTesting class, which handles the distribution of algorithms over the bookmarks so that each sample group has the same size. 
+
+\subsubsection{A/B Testing}
+In order to test different sets of parameters for the ARTS algorithm, we implemented an ABTesting class, which functions as a controller for picking an algorithm instance to calculate the priority of a Bookmark. The class holds a list of algorithm instances, which are loaded from the \lstinline|algorithms.ini| file. Any combination of parameters that were chosen for implementation can be defined in the \lstinline|algorithms.ini| file. Algorithms can be of any type that is specified as an algorithm class in the \lstinline|zeeguu.algos.arts| package. At the moment, the supported algorithm types are the standard ARTS algorithm using the reaction time (class ArtsRT), a random algorithm (class ArtsRandom), that returns a random priority, and two types (ArtsDiffSlow and ArtsDiffFast) which use the standard deviation of the reaction time to the population mean of an exercise instead of the reaction time alone. More about these last two in \autoref{arts:sd}. 
+
+Whenever the AlgoService is asked to update the priority of a bookmark, it will ask the ABTesting class for an algorithm with which the priority will be calculated. The ABTesting takes the modulo of the bookmark ID with the number of algorithms available and returns the algorithm with the index equal to the result of this calculation. By using this method, we ensure equally sized sample sizes for each of the algorithms that are tested. However, an algorithm can be chosen based on any Integer that is passed to the \lstinline|get_algorithm_for_id()| function in ABTesting. 
+
+
+\subsection{ARTS with Standard Deviation}\label{arts:sd}
+One of the advantages of the Zeeguu system is the variety in different exercises types like word recall\footnote{The user has to enter the word in target language based on the word in the native language.}, word matching\footnote{The user has to select the correct translation out of multiple options.} and word identification\footnote{The user has to identify the word in a sentence in the target language.}. Every word is learned in multiple exercise types as those exercise types have different difficulties levels. So, first a word just needs to be identified in a context (easy) and later recalled directly (difficult).
+
+The ARTS algorithm uses besides the correctness of the last answer also the response time. As one can imagine, the response time will be different between the different exercise types. To overcome the differences in response time throughout different exercise types and to make the data more comparable, we use the standard deviation to normalize the response time:
+
+\begin{equation}\label{eq:arts:fast}
+Priority = a * (N-D) * [(1 - \alpha) * b * e^{r * sd} + \alpha * w]
+\end{equation}
+
+In comparison to the original \autoref{eq:arts}, $log(\frac{RT}{r})$ was replaced in \autoref{eq:arts:fast} by $e^{r * sd}$. However, $sd$ is not exactly the response time. Instead, $sd$ is the difference of the reaction time ($rt$) from the $mean$ of an exercise, divided by the standard deviation $std$ of all reaction times for that exercise type. So: $sd = \frac{rt - mean}{std}$. In order to have the $mean$ and the $std$ value available, those are computed on the existing data in \lstinline|AlgoService.update_exercise_source_stats()| for each exercise type. Those should be re-computed every now and then - when more completed exercises are available. So, this essentially behaves like a long-term cache.
+
+Due to the fact of a power-function $e^{r * sd}$, the algorithm with standard deviation weights differences between slow (high) reaction times more than between fast (low) reaction times (a higher $sd$ results in a much bigger $e^{r * sd}$). However, desired would be that fast reaction times have an higher impact than slower ones - if answering takes very long, then more practise is definitely required. Therefore, the formula is adapted to: 
+
+\begin{equation}\label{eq:arts:slow}
+Priority = a * (N-D) * [(1 - \alpha) * \frac{b}{e^{r * sd}} + \alpha * w]
+\end{equation}
+
+Here, we divide the constant $b$ by the $e^{r * sd}$ factor, which yields bigger values (i.e. priorities) when reaction times are faster than the population mean (thus $sd$ is negative), than when the reaction times are slower than the mean (thus $sd$ is positive). Which and whether at all a version of the algorithms with standard deviation is used eventually was not decided during the internship and is thus entirely up to Prof. Lungu.
+
+\autoref{eq:arts} does not differentiate between different exercise types, but \autoref{eq:arts:fast} and \autoref{eq:arts:slow} do. All of those are implemented in code\footnote{\autoref{eq:arts} is in \lstinline|arts_rt.py|, \autoref{eq:arts:fast} in \lstinline|arts_diff_fast.py| and \autoref{eq:arts:slow} in \lstinline|arts_diff_slow.py|}. We recommend \autoref{eq:arts:slow} as it puts an higher importance on fast responses.
+
+\subsection{Unit Testing}
+After we implemented the code for the ARTS algorithm, we planned on writing unit tests to test its functionality and robustness. However, we ran into problems while integrating our unit tests into the existing testing environment. The Zeeguu unit tests all relied heavily on a script that populated the test database with (non-random) data and tested the Zeeguu functionality against this data. In order to test our algorithm implementation, we had to add additional data to the populate script, but this appeared to break other unit tests, which was obviously not our intention. After eventually integrating our unit tests into the existing testing framework, we decided to refactor the testing environment with certain guidelines in mind:
+
+\begin{enumerate}
+    \item Test Data should be truly random
+    \item Unit tests can add, edit,and delete the test data without consequences
+    \item Unit tests have to be truly independent of each other
+\end{enumerate}
+
+After discussing our plans with Prof. Lungu, we started refactoring the testing framework. We first implemented Rules (more about this in \autoref{testing:rules}), which are a common testing method in Java development\footnote{\url{http://www.vogella.com/tutorials/JUnit/article.html##junitadvanced_rules}}. These rules allowed us to add random testing data to the test database whenever an unit test needed it. For creating the random test data we used the Faker\footnote{\url{https://github.com/joke2k/faker}} framework, which offers a wide range of random data types (e.g. URLs, names, emails, words, sentences, etc.). 
+
+After we implemented the new test data creation framework, we changed the location of the test database from a mysql database to an in-memory sqlite database. This sped up the execution time of our tests from around 3 minutes to just 20 seconds. 
+
+\subsubsection{Rules}\label{testing:rules}
+We used the testing rules concept to populate the testing database with random data on which we ran the tests. The JUnit documentation defines rules in the following way:
+
+\begin{displayquote}
+\textit{Rules allow very flexible addition or redefinition of the behavior of each test method in a test class.}\footnote{\url{https://github.com/junit-team/junit4/wiki/Rules}}
+\end{displayquote}
+
+In our case, we created rules for any object (e.g. Bookmark), which me might have to add to the database before a test can be run. For creating bookmarks, for example, we created a \lstinline|BookmarkRule|, which takes a user object as argument and creates a random bookmark for the given user. Noteworthy here is that instances of all classes on which the \lstinline|Bookmark| object relies (e.g. \lstinline|Language|, \lstinline|Url|, \lstinline|ExerciseOutcome|, etc.) are created as well when a \lstinline|Bookmark| is created using the \lstinline|BookmarkRule|.
+
+\subsection{Determine the algorithm parameters}
+Determining the parameters turned out to be a more difficult task than expected in the beginning. In essence, the parameters depend on the objectives of the learning. For now, it was decided that the parameters should be adjusted in a way, that 20 words are being practiced in parallel.
+
+In order to derive the parameters for either of the \autoref{eq:arts}, \autoref{eq:arts:fast} and \autoref{eq:arts:slow}, the following constants need to be found: $b$, $D$ and $w$. As those depend on each other, an iterative approximation approach is chosen. The code can be found in the file \lstinline|algo_parameter_approximator.py|. If the found improvement gets too small or after the 30th iteration no improvements are found, the approximation finishes.
+
+The model calculates in each iteration the priority of all words that are currently being studied and 'learns' the word  (adds a new random exercise to the exercise log) with the highest priority, thus giving it a lower priority in the next iteration. In the beginning all words are given a constant, positive \lstinline|MAX_PRIORITY| score. Words are considered as learned as soon as they have been answered three times in a row correctly and are not repeated any further. This metric seems reasonable, but is subject to change - especially since the Zeeguu system uses user feedback at the moment. In the future, with the use of machine learning even the recall probability can be determined.
+
+To also account for various word difficulties, each word is assigned a likelihood-to-be-answered-correct value, which makes it more difficult to learn certain words. For this, the model uses the existing data to incorporate the data about the reaction time as well as how often a way has been answered correctly. So, the algorithm should be run again every now and then to update the parameters.
+
+
+
+\section{Personalizing / Individualizing the Parameters of ARTS for every Learner}
+
+To verify the ARTS algorithm, we have it run on all users that are using the Zeeguu system. As of 16.06.17, there are in total 666 users, from which 255 have used the system to also create a learning exercise (bookmark). The calculation took ~195 seconds. With our parameter-fitting script in \lstinline|algo_parameter_approximator.py|, we calculated values for $b, D,$ and $w$ so that the results from the ARTS algorithm best fit a given 'Hyper-parameter'\footnote{\url{https://en.wikipedia.org/wiki/Hyperparameter_(machine_learning)}}, which in our case was how many words a user learns simultaneously. We let our script calculate the $b, D,$ and $w$ parameters, so that the users would learn only 20 words simultaneously. In \autoref{table:artsrt:results} the summarized results and in \autoref{fig:artsrt:values} the detailed results are presented.
+
+Some pre-processing was done on the data beforehand to ignore invalid entries. From the 2017-06-12 database dump all exercise entries that were created before 2017-05-02 and all exercises, which reaction time (solving\_speed) is negative are excluded\footnote{See the appendix for script-based import and filtering}.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lrrrr|r}
+\multicolumn{1}{c}{\textbf{}}          & \multicolumn{1}{c}{\textbf{}}     & \multicolumn{1}{c}{\textbf{}}       & \multicolumn{2}{c}{\textbf{range}}                                  & \multicolumn{1}{c}{\textbf{}} \\
+\multicolumn{1}{c}{\textbf{Parameter}} & \multicolumn{1}{c}{\textbf{mean}} & \multicolumn{1}{c}{\textbf{median}} & \multicolumn{1}{c}{\textbf{from}} & \multicolumn{1}{c}{\textbf{to}} & \multicolumn{1}{c}{\textbf{Literature}} \\
+b                                      & 1.28                              & 1.10                                & 0.15                              & 21.10                           & 1.1 \\
+D                                      & 7.13                              & 3.25                                & 0.12                              & 27.00                           & 2 \\
+w                                      & 24.57                         & 22.50                               & 5.00                              & 50.00                           & 20 \\
+\end{tabular}
+\caption{Summarized overview of the calculated parameter values $b, D, w$ with the ARTS algorithm for each user according to the database dump from 2017-06-12}
+\label{table:artsrt:results}
+\end{table}
+
+First, the summarized (median) values in \autoref{table:artsrt:results} are quite close to the original values proposed by the authors of the ARTS algorithm. Although the starting point were the original values, no extraordinary shift towards one extreme is seen - except for the d parameter. But this was expected as due to the chosen goal of 20 concurrent words for which $D$ is parameter with the highest influence\footnote{When the goal is to have 10 concurrent words, the median of $D$ is 5.19 (mean: 2.00)}.
+
+\begin{figure}[H]
+\begin{tikzpicture}
+    \begin{axis}[xlabel=Zeeguu user id, ylabel=Value for the parameter, width=\textwidth]
+        \addplot[only marks, blue] table [x=user_id, y=b, col sep=comma] {algo_parameter_approximator.csv};
+        %\addplot[thick, blue] table [y={create col/linear regression={y=b}}] {algo_parameter_approximator.csv};
+        
+        \addplot[only marks, red] table [x=user_id, y=d, col sep=comma] {algo_parameter_approximator.csv};
+        %\addplot[thick, red] table [y={create col/linear regression={y=d}}] {algo_parameter_approximator.csv};
+        
+        \addplot[only marks, black] table [x=user_id, y=w, col sep=comma] {algo_parameter_approximator.csv};
+        %\addplot[thick, black] table [y={create col/linear regression={y=w}}] {algo_parameter_approximator.csv};
+        
+        \legend{
+        Parameter $b$,
+        %Trend $b$,
+        Parameter $D$,
+        %Trend $D$,
+        Parameter $w$,
+        %Trend $w$
+        }
+    \end{axis}
+\end{tikzpicture}
+\caption{Detailed overview of the calculated parameter values $b, D, w$ with the ARTS algorithm for each user according to the database dump from 2017-06-12}
+\label{fig:artsrt:values}
+\end{figure}
+
+In \autoref{fig:artsrt:values} the detailed results are presented. For each user id exist three dots corresponding to the parameters $b, D, w$. As some users (x-axis) are not active, some gaps are present especially in the range of 200 to 350 or even till 600.
+
+In comparison to the first users (low user ids), users that joined later have a lower parameter for $D$ and higher $w$ parameter. This is due to the fact that newer users have not studied so many words, neither added so many words to their account. Thus, all words need to be repeated more often.
+
+Also, the graph shows in the user id range starting from 600 clustered dots with the same value for multiple users. This is also due to new users which have not such a diverse data set yet. Still, those values can be used as default values for new users.
+
+This shifts the focus for the analysis towards the left hand side of the graph. The parameters cluster around the mean values and differ to some extend from the median values. Therefore, the parameters should be adjusted over time to reflect each users own learning history.
+
+\subsection{Algorithm with Standard deviation}
+We also applied the improved algorithm with standard deviation from \autoref{eq:arts:slow}. In fact, different mean values exist between the exercise types, proving the assumption that each exercise types has a different reaction speed.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lrrrr|r}
+\multicolumn{1}{c}{\textbf{}}          & \multicolumn{1}{c}{\textbf{}}     & \multicolumn{1}{c}{\textbf{}}       & \multicolumn{2}{c}{\textbf{range}}                                  & \multicolumn{1}{c}{\textbf{}} \\
+\multicolumn{1}{c}{\textbf{Parameter}} & \multicolumn{1}{c}{\textbf{mean}} & \multicolumn{1}{c}{\textbf{median}} & \multicolumn{1}{c}{\textbf{from}} & \multicolumn{1}{c}{\textbf{to}} & \multicolumn{1}{c}{\textbf{Literature}} \\
+b                                      & 1.41                              & 1.10                                & 0.15                              & 37.00                           & 1.1 \\
+D                                      & 10.33                              & 7.00                               & 0.50                              & 37.00                           & 2 \\
+w                                      & 19.16                             & 20.00                               & 0.00                              & 30.00                           & 20 \\
+\end{tabular}
+\caption{Summarized overview of the calculated parameter values $b, D, w$ with the ARTS algorithm \textit{with standard deviation as proposed in \autoref{eq:arts:slow}}  for each user according to the database dump from 2017-06-12}
+\label{table:artsstd:results}
+\end{table}
+
+\begin{figure}[H]
+\begin{tikzpicture}
+    \begin{axis}[xlabel=Zeeguu user id, ylabel=Value for the parameter, width=\textwidth]
+        \addplot[only marks, blue] table [x=user_id, y=b, col sep=comma] {algo_parameter_approximator_deviation.csv};
+        %\addplot[thick, blue] table [y={create col/linear regression={y=b}}] {algo_parameter_approximator_deviation.csv};
+        
+        \addplot[only marks, red] table [x=user_id, y=d, col sep=comma] {algo_parameter_approximator_deviation.csv};
+        %\addplot[thick, red] table [y={create col/linear regression={y=d}}] {algo_parameter_approximator_deviation.csv};
+        
+        \addplot[only marks, black] table [x=user_id, y=w, col sep=comma] {algo_parameter_approximator_deviation.csv};
+        %\addplot[thick, black] table [y={create col/linear regression={y=w}}] {algo_parameter_approximator_deviation.csv};
+        
+        \legend{
+        Parameter $b$,
+        %Trend $b$,
+        Parameter $D$,
+        %Trend $D$,
+        Parameter $w$,
+        %Trend $w$
+        }
+    \end{axis}
+\end{tikzpicture}
+\caption{Detailed overview of the calculated parameter values $b, D, w$ with the ARTS algorithm \textit{with standard deviation as proposed in \autoref{eq:arts:slow}} for each user according to the database dump from 2017-06-12}
+\label{fig:artsrt:values2}
+\end{figure}
+
+One remark needs to be made for \autoref{fig:artsrt:values2}. In the user id range of 700 to 800, a sudden jump of the $w$ parameter to 30 is recognizable compared to the original ARTS algorithm in \autoref{fig:artsrt:values}. The reason is that those Zeeguu user have no complete exercises yet and so default data is assumed, which produces different results. A closer look at the data is taken in \autoref{sec:divingIntoTheData}.
+
+
+\subsection{Diving deeper into the data}\label{sec:divingIntoTheData}
+In \autoref{fig:artsrt:values} straight horizontal lines can be identified, as well as missing data points and dots spread out over the complete y range. Therefore, we had a look at the database dump and how many bookmarks and exercises each Zeeguu user has created. Although the data about the amount of exercises per user is relevant, for further research, we also included data about the amount of bookmarks\footnote{Every exercise is always linked to a bookmark. One exercise has always one bookmark, one bookmark can have multiple exercises (One-To-Many)}.
+
+\pgfplotsset{compat=1.3} % necessary for label of the secondary y axis to be on the right
+\begin{figure}[H]
+\begin{tikzpicture}
+    \begin{axis}[scale only axis, axis y line*=left,
+                 xlabel=Zeeguu user ids, ylabel={\ref{plot_exercises} Amount of exercises}]
+        \addplot[ybar, bar width=1, solid, blue] table [x=user_id, y=exercises, col sep=comma] {algo_parameter_approximator.csv};
+        \label{plot_exercises}
+        \addlegendentry{Exercises}
+    \end{axis}
+    \begin{axis}[scale only axis, axis y line*=right, axis x line=none,
+                 ylabel={\ref{plot_bookmarks} Amount of bookmarks}]
+        \addlegendimage{/pgfplots/refstyle=plot_exercises}\addlegendentry{Exercises}
+        
+        \addplot[ybar, bar width=.1, solid, red] table [x=user_id, y=bookmarks, col sep=comma] {algo_parameter_approximator.csv};
+        \label{plot_bookmarks}
+        \addlegendentry{Bookmarks}
+    \end{axis}
+\end{tikzpicture}
+\caption{Amount of exercises and bookmarks for each user according to the database dump from 2017-06-12}
+\label{fig:artsrt:exercisesAndBookmarks}
+\end{figure}
+
+With the visualization of \autoref{fig:artsrt:exercisesAndBookmarks}, we derived the following statements:
+\begin{itemize}
+    \item Whenever no parameters could be calculated for a Zeeguu user, then also no exercise or bookmark exists for that user (see especially user ids 200 to 300).
+    
+    \item The more exercises one Zeeguu user completes, the more likely and further do the individual algorithm parameters move away from the default values. 
+    
+    \item The ratio between exercises and bookmarks has no effect on the parameters for the algorithm.
+    
+    \item When people start using the Zeeguu system, they usually have more completed exercises than bookmarks. So, users actually use the system to repeat words to learn them and not only bookmark them.
+\end{itemize}
+
+
+\section{Conclusion}
+The main focus of our internship was implementing the ARTS algorithm, but this was done surprisingly quickly, which gave us the opportunity to contribute to the Zeeguu project as a whole. We decided on refactoring the testing framework, which was needed for our unit tests, but also improved the quality of other unit tests, which were always testing against a non-random dataset. After refactoring the testing framework, we turned our attention back to the ARTS algorithm and tried to extrapolate its performance based on real data. We were surprised again how easy it was to tweak the algorithm based on a given requirement like e.g. a user should learn only 20 words simultaneously. 
+
+In conclusion, we were content with our decision to use the ARTS algorithm instead of the DASH algorithm since our assumption that the ARTS algorithm would be better customizable than the DASH algorithm was vindicated. We think that we implemented the ARTS algorithm successfully and improved the overall quality of the Zeeguu code. We further hope that the algorithm will be useful in the future as well. 
+
+\nocite{khajah2014maximizing}
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+\pagebreak
+\appendix
+\section{Files used to import and filter the database dump}
+\subsection{Import a database dump}
+\lstinputlisting{prepare.sh}
+\subsection{Filter the database dump}
+\lstinputlisting{filter.sh}
+
+
+\end{document}
