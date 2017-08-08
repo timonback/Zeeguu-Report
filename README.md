@@ -1,6 +1,6 @@
 # Zeeguu-Report
 
-Documentation for the internship at the University of Groningen with Prof. Mircea Lungu. The written report can be found in report.pdf, the other files are source files for it.
+Documentation for the internship at the University of Groningen with Prof. Mircea Lungu. The written report can be found in [report.pdf](https://github.com/timonback/Zeeguu-Report/blob/master/report.pdf), the other files are source files for it.
 
 # Zeeguu
 
